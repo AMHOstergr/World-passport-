@@ -46,6 +46,81 @@
     };
   }
 </script>
+<script>
+  // Polyfill for window.storage: the app expects Claude's artifact persistent
+  // storage API, which does not exist on a regular hosted website. This
+  // reimplements the same get/set/delete/list interface backed by
+  // localStorage (falling back to an in-memory store if localStorage is
+  // unavailable), so the app's save/load calls work identically here.
+  window.storage = (function () {
+    var mem = {};
+    var hasReal = false;
+    try {
+      localStorage.setItem("__wp_storage_test__", "1");
+      localStorage.removeItem("__wp_storage_test__");
+      hasReal = true;
+    } catch (e) { hasReal = false; }
+
+    function keyFor(key, shared) {
+      return "wpstorage:" + (shared ? "shared:" : "priv:") + key;
+    }
+    function rawGet(k) {
+      if (hasReal) { try { return localStorage.getItem(k); } catch (e) {} }
+      return mem.hasOwnProperty(k) ? mem[k] : null;
+    }
+    function rawSet(k, v) {
+      if (hasReal) { try { localStorage.setItem(k, v); return; } catch (e) {} }
+      mem[k] = v;
+    }
+    function rawRemove(k) {
+      if (hasReal) { try { localStorage.removeItem(k); return; } catch (e) {} }
+      delete mem[k];
+    }
+    function rawKeys() {
+      if (hasReal) {
+        try {
+          var out = [];
+          for (var i = 0; i < localStorage.length; i++) out.push(localStorage.key(i));
+          return out;
+        } catch (e) {}
+      }
+      return Object.keys(mem);
+    }
+
+    return {
+      get: function (key, shared) {
+        return new Promise(function (resolve) {
+          var raw = rawGet(keyFor(key, shared));
+          if (raw === null || raw === undefined) { resolve(null); return; }
+          resolve({ key: key, value: raw, shared: !!shared });
+        });
+      },
+      set: function (key, value, shared) {
+        return new Promise(function (resolve) {
+          rawSet(keyFor(key, shared), value);
+          resolve({ key: key, value: value, shared: !!shared });
+        });
+      },
+      delete: function (key, shared) {
+        return new Promise(function (resolve) {
+          rawRemove(keyFor(key, shared));
+          resolve({ key: key, deleted: true, shared: !!shared });
+        });
+      },
+      list: function (prefix, shared) {
+        return new Promise(function (resolve) {
+          var base = "wpstorage:" + (shared ? "shared:" : "priv:");
+          var full = base + (prefix || "");
+          var keys = rawKeys()
+            .filter(function (k) { return k.indexOf(full) === 0; })
+            .map(function (k) { return k.slice(base.length); });
+          resolve({ keys: keys, prefix: prefix, shared: !!shared });
+        });
+      }
+    };
+  })();
+</script>
+
 <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin="anonymous" onerror="__cdnFail__('React')()"></script>
 <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous" onerror="__cdnFail__('ReactDOM')()"></script>
 <script>
